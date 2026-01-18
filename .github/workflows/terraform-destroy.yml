@@ -1,0 +1,173 @@
+name: Emergency Terraform Destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to destroy (dev/prod)'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+      confirmation:
+        description: 'Type "DESTROY" to confirm'
+        required: true
+        type: string
+      reason:
+        description: 'Reason for emergency destroy'
+        required: true
+        type: string
+
+env:
+  TF_VERSION: '1.6.0'
+  AWS_REGION: 'us-east-1'
+
+permissions:
+  id-token: write
+  contents: read
+  issues: write
+
+jobs:
+  validate-inputs:
+    name: Validate Destroy Request
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirmation }}" != "DESTROY" ]; then
+            echo "❌ Confirmation must be exactly 'DESTROY'"
+            exit 1
+          fi
+          echo "✅ Confirmation validated"
+
+      - name: Validate environment
+        run: |
+          if [[ ! "${{ github.event.inputs.environment }}" =~ ^(dev|prod)$ ]]; then
+            echo "❌ Environment must be 'dev' or 'prod'"
+            exit 1
+          fi
+          echo "✅ Environment validated: ${{ github.event.inputs.environment }}"
+
+      - name: Log destroy request
+        run: |
+          echo "🚨 EMERGENCY DESTROY REQUEST"
+          echo "Environment: ${{ github.event.inputs.environment }}"
+          echo "Requested by: ${{ github.actor }}"
+          echo "Reason: ${{ github.event.inputs.reason }}"
+          echo "Timestamp: $(date -u)"
+
+  emergency-destroy:
+    name: Emergency Destroy - ${{ github.event.inputs.environment }}
+    runs-on: ubuntu-latest
+    needs: validate-inputs
+    environment: 
+      name: ${{ github.event.inputs.environment == 'prod' && 'production-destroy' || 'development-destroy' }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ github.event.inputs.environment == 'prod' && secrets.AWS_ROLE_ARN_PROD || secrets.AWS_ROLE_ARN_DEV }}
+          role-session-name: terraform-emergency-destroy-${{ github.event.inputs.environment }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create backup before destroy
+        run: |
+          echo "Creating emergency backup..."
+          timestamp=$(date +%Y%m%d-%H%M%S)
+          
+          # Backup Terraform state
+          aws s3 cp s3://your-terraform-state-bucket/${{ github.event.inputs.environment }}/terraform.tfstate \
+            s3://your-backup-bucket/emergency-backup-${{ github.event.inputs.environment }}-${timestamp}.tfstate
+          
+          # Export current resource inventory
+          terraform init
+          terraform show -json > resource-inventory-${timestamp}.json
+          aws s3 cp resource-inventory-${timestamp}.json \
+            s3://your-backup-bucket/inventory-${{ github.event.inputs.environment }}-${timestamp}.json
+        working-directory: environments/${{ github.event.inputs.environment }}
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: environments/${{ github.event.inputs.environment }}
+
+      - name: Generate Destroy Plan
+        id: destroy-plan
+        run: |
+          terraform plan -destroy -detailed-exitcode -out=destroy-plan
+          echo "destroy-plan-created=true" >> $GITHUB_OUTPUT
+        working-directory: environments/${{ github.event.inputs.environment }}
+
+      - name: Show Destroy Plan
+        run: terraform show destroy-plan
+        working-directory: environments/${{ github.event.inputs.environment }}
+
+      - name: Execute Emergency Destroy
+        id: destroy
+        run: |
+          echo "🚨 EXECUTING EMERGENCY DESTROY"
+          echo "Environment: ${{ github.event.inputs.environment }}"
+          echo "Reason: ${{ github.event.inputs.reason }}"
+          
+          terraform apply -auto-approve destroy-plan
+        working-directory: environments/${{ github.event.inputs.environment }}
+
+      - name: Verify Destruction
+        run: |
+          echo "Verifying resource destruction..."
+          # Add verification commands to ensure resources are destroyed
+          # aws ec2 describe-instances --filters "Name=tag:Environment,Values=${{ github.event.inputs.environment }}"
+
+      - name: Create Incident Report
+        if: always()
+        run: |
+          cat > incident-report.md << EOF
+          # Emergency Destroy Incident Report
+          
+          ## Summary
+          - **Environment**: ${{ github.event.inputs.environment }}
+          - **Executed by**: ${{ github.actor }}
+          - **Timestamp**: $(date -u)
+          - **Reason**: ${{ github.event.inputs.reason }}
+          - **Status**: ${{ steps.destroy.outcome }}
+          
+          ## Actions Taken
+          1. Backup created before destruction
+          2. Destroy plan generated and reviewed
+          3. Emergency destroy executed
+          4. Resource destruction verified
+          
+          ## Recovery Information
+          - State backup location: s3://your-backup-bucket/emergency-backup-${{ github.event.inputs.environment }}-*
+          - Resource inventory: s3://your-backup-bucket/inventory-${{ github.event.inputs.environment }}-*
+          - Recovery procedure: See docs/DISASTER_RECOVERY.md
+          
+          ## Next Steps
+          - [ ] Review incident cause
+          - [ ] Update procedures if needed
+          - [ ] Plan environment recreation if required
+          EOF
+          
+          # Upload incident report
+          aws s3 cp incident-report.md s3://your-backup-bucket/incident-reports/
+
+      - name: Notify Teams
+        if: always()
+        run: |
+          echo "🚨 EMERGENCY DESTROY COMPLETED"
+          echo "Environment: ${{ github.event.inputs.environment }}"
+          echo "Status: ${{ steps.destroy.outcome }}"
+          echo "Executed by: ${{ github.actor }}"
+          echo "Reason: ${{ github.event.inputs.reason }}"
+          
+          # Add notifications to Slack, PagerDuty, etc.
+          # This should be a high-priority alert

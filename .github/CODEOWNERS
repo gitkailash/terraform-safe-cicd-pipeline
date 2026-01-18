@@ -1,0 +1,28 @@
+# Global owners for all files
+* @devops-team
+
+# Infrastructure code requires DevOps team approval
+/environments/ @devops-team @infrastructure-team
+/modules/ @devops-team @infrastructure-team
+/.github/workflows/ @devops-team @infrastructure-team
+
+# Production environment requires additional approval
+/environments/prod/ @devops-team @infrastructure-team @senior-devops
+
+# Scripts and automation require DevOps approval
+/scripts/ @devops-team
+
+# Documentation can be updated by broader team
+/docs/ @devops-team @engineering-team
+
+# Terraform backend configuration requires senior approval
+/terraform-backend/ @devops-team @senior-devops @cto
+
+# Emergency procedures require multiple approvals
+/docs/DISASTER_RECOVERY.md @devops-team @senior-devops @security-team
+/docs/ROLLBACK.md @devops-team @senior-devops
+/scripts/rollback.sh @devops-team @senior-devops
+
+# CI/CD workflows require careful review
+/.github/workflows/terraform-ci.yml @devops-team @infrastructure-team @senior-devops
+/.github/workflows/terraform-destroy.yml @devops-team @senior-devops @cto
