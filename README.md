@@ -155,7 +155,7 @@ This repository implements a secure, production-ready CI/CD pipeline for Terrafo
 
 ## Contributing
 
-See [DEPLOYMENT.md](docs/DEPLOYMENT.md) for detailed deployment procedures and [ROLLBACK.md](docs/ROLLBACK.md) for rollback instructions.
+See [DEPLOYMENT.md](docs/DEPLOYMENT.md) for detailed deployment procedures, [ROLLBACK.md](docs/ROLLBACK.md) for rollback instructions, and [DISASTER_RECOVERY.md](docs/DISASTER_RECOVERY.md) for emergency procedures.
 
 ## Support
 
