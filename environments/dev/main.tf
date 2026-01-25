@@ -9,14 +9,11 @@ terraform {
   }
   
   backend "s3" {
-    bucket         = "your-terraform-state-bucket"
+    bucket         = "terraform-safe-cicd-pipeline-2026"
     key            = "dev/terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
-    dynamodb_table = "terraform-state-lock"
-    
-    # Enable versioning for state file recovery
-    versioning = true
+    use_lockfile = true
   }
 }
 
@@ -115,6 +112,7 @@ module "ecs" {
   
   cluster_name = "${var.project_name}-dev"
   environment  = "dev"
+  vpc_id       = module.vpc.vpc_id
   
   # Development-specific settings
   enable_container_insights = true
