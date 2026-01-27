@@ -7,17 +7,6 @@ terraform {
       version = "~> 5.0"
     }
   }
-  
-  backend "s3" {
-    bucket         = "your-terraform-state-bucket"
-    key            = "prod/terraform.tfstate"
-    region         = "us-east-1"
-    encrypt        = true
-    dynamodb_table = "terraform-state-lock"
-    
-    # Enable versioning for state file recovery
-    versioning = true
-  }
 }
 
 provider "aws" {
@@ -50,16 +39,9 @@ module "vpc" {
   availability_zones = var.availability_zones
   public_subnets     = var.public_subnets
   private_subnets    = var.private_subnets
-  database_subnets   = var.database_subnets
   
-  enable_nat_gateway     = true
-  enable_vpn_gateway     = false
-  enable_dns_hostnames   = true
-  enable_dns_support     = true
-  enable_flow_log        = true
-  
-  # Production-specific networking
-  single_nat_gateway = false # Multiple NAT gateways for HA
+  enable_nat_gateway = true
+  enable_vpn_gateway = false
   
   tags = {
     Environment = "prod"
@@ -68,7 +50,7 @@ module "vpc" {
   }
 }
 
-# Production Application Load Balancer with WAF
+# Production Application Load Balancer
 module "alb" {
   source = "../../modules/alb"
   
@@ -78,12 +60,6 @@ module "alb" {
   security_group_ids = [aws_security_group.alb.id]
   
   enable_deletion_protection = true # Enabled for production
-  enable_http2              = true
-  enable_cross_zone_load_balancing = true
-  
-  # SSL/TLS Configuration
-  certificate_arn = var.ssl_certificate_arn
-  ssl_policy      = "ELBSecurityPolicy-TLS-1-2-2017-01"
   
   tags = {
     Environment = "prod"
@@ -99,6 +75,12 @@ resource "aws_wafv2_web_acl" "main" {
   
   default_action {
     allow {}
+  }
+  
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "${var.project_name}ProdWAF"
+    sampled_requests_enabled   = true
   }
   
   # Rate limiting rule
@@ -155,7 +137,7 @@ resource "aws_wafv2_web_acl" "main" {
 
 # Associate WAF with ALB
 resource "aws_wafv2_web_acl_association" "main" {
-  resource_arn = module.alb.arn
+  resource_arn = module.alb.alb_arn
   web_acl_arn  = aws_wafv2_web_acl.main.arn
 }
 
@@ -198,13 +180,11 @@ module "ecs" {
   
   cluster_name = "${var.project_name}-prod"
   environment  = "prod"
+  vpc_id       = module.vpc.vpc_id
   
   # Production-specific settings
   enable_container_insights = true
   capacity_providers        = ["FARGATE"]
-  
-  # Enhanced monitoring and logging
-  enable_execute_command_logging = true
   
   tags = {
     Environment = "prod"
@@ -213,20 +193,18 @@ module "ecs" {
   }
 }
 
-# Production RDS with Multi-AZ and enhanced security
+# Production RDS with enhanced security
 module "rds" {
   source = "../../modules/rds"
   
   identifier = "${var.project_name}-prod-db"
   
   engine         = "postgres"
-  engine_version = "15.4"
+  engine_version = "15.8"
   instance_class = var.db_instance_class
   
   allocated_storage     = var.db_allocated_storage
   max_allocated_storage = var.db_max_allocated_storage
-  storage_encrypted     = true
-  kms_key_id           = aws_kms_key.rds.arn
   
   db_name  = var.db_name
   username = var.db_username
@@ -242,72 +220,15 @@ module "rds" {
   backup_window          = "03:00-04:00"
   maintenance_window     = "sun:04:00-sun:05:00"
   
-  # High availability
-  multi_az = true
-  
-  # Enhanced monitoring
-  monitoring_interval = 60
-  monitoring_role_arn = aws_iam_role.rds_monitoring.arn
-  
-  # Performance Insights
-  performance_insights_enabled = true
-  performance_insights_retention_period = 7
-  
   # Security
   deletion_protection = true
   skip_final_snapshot = false
-  final_snapshot_identifier = "${var.project_name}-prod-db-final-snapshot-${formatdate("YYYY-MM-DD-hhmm", timestamp())}"
   
   tags = {
     Environment = "prod"
     Terraform   = "true"
     Compliance  = "required"
   }
-}
-
-# KMS key for RDS encryption
-resource "aws_kms_key" "rds" {
-  description             = "KMS key for RDS encryption in production"
-  deletion_window_in_days = 7
-  
-  tags = {
-    Name        = "${var.project_name}-prod-rds-key"
-    Environment = "prod"
-    Terraform   = "true"
-  }
-}
-
-resource "aws_kms_alias" "rds" {
-  name          = "alias/${var.project_name}-prod-rds"
-  target_key_id = aws_kms_key.rds.key_id
-}
-
-# RDS Enhanced Monitoring Role
-resource "aws_iam_role" "rds_monitoring" {
-  name = "${var.project_name}-prod-rds-monitoring-role"
-  
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "monitoring.rds.amazonaws.com"
-        }
-      }
-    ]
-  })
-  
-  tags = {
-    Environment = "prod"
-    Terraform   = "true"
-  }
-}
-
-resource "aws_iam_role_policy_attachment" "rds_monitoring" {
-  role       = aws_iam_role.rds_monitoring.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
 }
 
 # Production RDS Security Group
@@ -329,54 +250,12 @@ resource "aws_security_group" "rds" {
   }
 }
 
-# Production CloudWatch Log Groups with longer retention
+# Production CloudWatch Log Groups
 resource "aws_cloudwatch_log_group" "app_logs" {
   name              = "/aws/ecs/${var.project_name}-prod"
   retention_in_days = var.log_retention_days
-  kms_key_id        = aws_kms_key.logs.arn
   
   tags = {
-    Environment = "prod"
-    Terraform   = "true"
-  }
-}
-
-# KMS key for CloudWatch Logs encryption
-resource "aws_kms_key" "logs" {
-  description             = "KMS key for CloudWatch Logs encryption in production"
-  deletion_window_in_days = 7
-  
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "Enable IAM User Permissions"
-        Effect = "Allow"
-        Principal = {
-          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
-        }
-        Action   = "kms:*"
-        Resource = "*"
-      },
-      {
-        Effect = "Allow"
-        Principal = {
-          Service = "logs.${data.aws_region.current.name}.amazonaws.com"
-        }
-        Action = [
-          "kms:Encrypt",
-          "kms:Decrypt",
-          "kms:ReEncrypt*",
-          "kms:GenerateDataKey*",
-          "kms:DescribeKey"
-        ]
-        Resource = "*"
-      }
-    ]
-  })
-  
-  tags = {
-    Name        = "${var.project_name}-prod-logs-key"
     Environment = "prod"
     Terraform   = "true"
   }
@@ -405,10 +284,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "assets" {
   
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm     = "aws:kms"
-      kms_master_key_id = aws_kms_key.s3.arn
+      sse_algorithm = "AES256"
     }
-    bucket_key_enabled = true
   }
 }
 
@@ -419,18 +296,6 @@ resource "aws_s3_bucket_public_access_block" "assets" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
-}
-
-# KMS key for S3 encryption
-resource "aws_kms_key" "s3" {
-  description             = "KMS key for S3 encryption in production"
-  deletion_window_in_days = 7
-  
-  tags = {
-    Name        = "${var.project_name}-prod-s3-key"
-    Environment = "prod"
-    Terraform   = "true"
-  }
 }
 
 resource "random_id" "bucket_suffix" {

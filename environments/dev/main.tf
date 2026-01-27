@@ -7,14 +7,6 @@ terraform {
       version = "~> 5.0"
     }
   }
-  
-  backend "s3" {
-    bucket         = "terraform-safe-cicd-pipeline-2026"
-    key            = "dev/terraform.tfstate"
-    region         = "us-east-1"
-    encrypt        = true
-    use_lockfile = true
-  }
 }
 
 provider "aws" {
@@ -131,7 +123,7 @@ module "rds" {
   identifier = "${var.project_name}-dev-db"
   
   engine         = "postgres"
-  engine_version = "15.4"
+  engine_version = "15.8"
   instance_class = "db.t3.micro" # Small instance for dev
   
   allocated_storage     = 20

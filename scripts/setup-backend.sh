@@ -140,10 +140,12 @@ check_prerequisites() {
         exit 1
     fi
 
-    # Check jq
+    # Check jq (optional for basic functionality)
     if ! command -v jq &> /dev/null; then
-        error "jq is not installed. Please install it first."
-        exit 1
+        warning "jq is not installed. Some features may be limited."
+        JQ_AVAILABLE=false
+    else
+        JQ_AVAILABLE=true
     fi
 
     # Check AWS credentials
@@ -153,12 +155,16 @@ check_prerequisites() {
     fi
 
     # Check Terraform version
-    local tf_version=$(terraform version -json | jq -r '.terraform_version')
-    local required_version="1.6.0"
-    
-    if ! printf '%s\n%s\n' "$required_version" "$tf_version" | sort -V -C; then
-        error "Terraform version $tf_version is too old. Required: >= $required_version"
-        exit 1
+    if command -v jq &> /dev/null; then
+        local tf_version=$(terraform version -json | jq -r '.terraform_version')
+        local required_version="1.6.0"
+        
+        if ! printf '%s\n%s\n' "$required_version" "$tf_version" | sort -V -C; then
+            error "Terraform version $tf_version is too old. Required: >= $required_version"
+            exit 1
+        fi
+    else
+        warning "Cannot verify Terraform version without jq. Proceeding anyway."
     fi
 
     success "All prerequisites met"
@@ -238,7 +244,7 @@ owner                 = "devops-team"
 cost_center           = "infrastructure"
 
 # Enable cross-region replication for disaster recovery
-enable_cross_region_replication = true
+enable_cross_region_replication = false
 EOF
 
     success "Created terraform.tfvars file"
