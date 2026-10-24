@@ -2,6 +2,7 @@
 
 [![Terraform](https://img.shields.io/badge/Terraform-1.6+-623CE4?logo=terraform&logoColor=white)](https://www.terraform.io/)
 [![AWS](https://img.shields.io/badge/AWS-Cloud-FF9900?logo=amazon-aws&logoColor=white)](https://aws.amazon.com/)
+![AWS Kiro](https://img.shields.io/badge/AWS-Kiro-232F3E?logo=amazonaws&logoColor=white)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Tested](https://img.shields.io/badge/Status-Production%20Ready-brightgreen)](TESTING_RESULTS_SUMMARY.md)
 
